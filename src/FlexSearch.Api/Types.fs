@@ -27,6 +27,7 @@ type ShardConfiguration() =
 type IndexConfiguration() = 
     inherit ValidatableObjectBase<IndexConfiguration>()
     
+    //*** Why do we need both a DefaultValueAttribute and a default value in the property?
     /// <summary>
     /// The amount of time in seconds that FlexSearch should wait before committing changes to the disk.
     /// </summary>
@@ -122,6 +123,7 @@ type Field(fieldName : string, fieldType : FieldType) =
     [<DefaultValue(true)>]
     member val Analyze = true with get, set
     
+    //*** What do you mean by "a field can only be stored without indexing" ? Store it where?
     /// <summary>
     /// Signifies if a field should be indexed. A field can only be 
     /// stored without indexing.

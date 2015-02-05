@@ -68,7 +68,7 @@ module QueryHelpers =
     // Find terms associated with the search string
     let inline GetTerms(flexField : FlexField, value) = 
         match GetSearchAnalyzer(flexField) with
-        | Some(a) -> ParseTextUsingAnalyzer(a, flexField.SchemaName, value)
+        | Some(a) -> LuceneProviders.ParseTextUsingAnalyzer(a, flexField.SchemaName, value)
         | None -> new List<string>([ value ])
     
     let GetKeyValue(value : string) = 

@@ -44,30 +44,6 @@ open org.apache.lucene.search.postingshighlight
 // ----------------------------------------------------------------------------
 [<AutoOpen>]
 module SearchDsl = 
-    let FlexCharTermAttribute = 
-        lazy java.lang.Class.forName 
-                 (typeof<org.apache.lucene.analysis.tokenattributes.CharTermAttribute>.AssemblyQualifiedName)
-    
-    /// Utility function to get tokens from the search string based upon the passed analyzer
-    /// This will enable us to avoid using the Lucene query parser
-    /// We cannot use simple white space based token generation as it really depends 
-    /// upon the analyzer used
-    let inline ParseTextUsingAnalyzer(analyzer : Analyzer, fieldName, queryText) = 
-        let tokens = new List<string>()
-        let source : TokenStream = analyzer.tokenStream (fieldName, new StringReader(queryText))
-        // Get the CharTermAttribute from the TokenStream
-        let termAtt = source.addAttribute (FlexCharTermAttribute.Value)
-        try 
-            try 
-                source.reset()
-                while source.incrementToken() do
-                    tokens.Add(termAtt.ToString())
-                source.``end``()
-            with ex -> ()
-        finally
-            source.close()
-        tokens
-    
     let private IsStoredField(flexField : FlexField) = 
         match flexField.FieldType with
         | FlexFieldType.FlexStored -> 
@@ -117,40 +93,41 @@ module SearchDsl =
                 match pred with
                 | NotPredicate(pr) -> 
                     let! notQuery = generateQuery (pr)
-                    let query = new BooleanQuery()
-                    query.add (new BooleanClause(notQuery, BooleanClause.Occur.MUST_NOT))
-                    return (query :> Query)
+                    return 
+                        LuceneProviders.getBooleanQuery
+                        |> LuceneProviders.addBooleanClause notQuery BooleanClause.Occur.MUST_NOT
+                        :> Query
                 | Condition(f, o, v, p) -> 
                     let! field = KeyExists(f, fields, Errors.INVALID_FIELD_NAME |> GenerateOperationMessage)
                     do! IsStoredField field
                     let! query = KeyExists(o, queryTypes, Errors.INVALID_QUERY_TYPE |> GenerateOperationMessage)
                     let! value = maybe { 
-                                     match isProfileBased with
-                                     | Some(source) -> 
-                                         match source.TryGetValue(f) with
-                                         | true, v' -> return [| v' |]
-                                         | _ -> 
-                                             match searchQuery.MissingValueConfiguration.TryGetValue(f) with
-                                             | true, configuration -> 
-                                                 match configuration with
-                                                 | MissingValueOption.Default -> return! v.GetValueAsArray()
-                                                 | MissingValueOption.ThrowError -> 
-                                                     return! Choice2Of2(Errors.MISSING_FIELD_VALUE
-                                                                        |> GenerateOperationMessage
-                                                                        |> Append("Field Name", f))
-                                                 | MissingValueOption.Ignore -> 
-                                                     generateMatchAllQuery := true
-                                                     return [| "" |]
-                                                 | _ -> 
-                                                     return! Choice2Of2(Errors.UNKNOWN_MISSING_VALUE_OPTION
-                                                                        |> GenerateOperationMessage
-                                                                        |> Append("Field Name", f))
-                                             | _ -> 
-                                                 // Check if a non blank value is provided as a part of the query
-                                                 return! v.GetValueAsArray()
-                                     | None -> return! v.GetValueAsArray()
-                                 }
-                    if generateMatchAllQuery.Value = true then return! Choice1Of2(new MatchAllDocsQuery() :> Query)
+                            match isProfileBased with
+                            | Some(source) -> 
+                                match source.TryGetValue(f) with
+                                | true, v' -> return [| v' |]
+                                | _ -> 
+                                    match searchQuery.MissingValueConfiguration.TryGetValue(f) with
+                                    | true, configuration -> 
+                                        match configuration with
+                                        | MissingValueOption.Default -> return! v.GetValueAsArray()
+                                        | MissingValueOption.ThrowError -> 
+                                            return! Choice2Of2(Errors.MISSING_FIELD_VALUE
+                                                            |> GenerateOperationMessage
+                                                            |> Append("Field Name", f))
+                                        | MissingValueOption.Ignore -> 
+                                            generateMatchAllQuery := true
+                                            return [| "" |]
+                                        | _ -> 
+                                            return! Choice2Of2(Errors.UNKNOWN_MISSING_VALUE_OPTION
+                                                            |> GenerateOperationMessage
+                                                            |> Append("Field Name", f))
+                                    | _ -> 
+                                        // Check if a non blank value is provided as a part of the query
+                                        return! v.GetValueAsArray()
+                            | None -> return! v.GetValueAsArray()
+                        }
+                    if generateMatchAllQuery.Value = true then return! Choice1Of2(LuceneProviders.getMatchAllDocsQuery :> Query)
                     else 
                         let! q = query.GetQuery(field, value.ToArray(), p)
                         match p with
@@ -166,17 +143,17 @@ module SearchDsl =
                 | OrPredidate(lhs, rhs) -> 
                     let! lhsQuery = generateQuery (lhs)
                     let! rhsQuery = generateQuery (rhs)
-                    let query = new BooleanQuery()
-                    query.add (new BooleanClause(lhsQuery, BooleanClause.Occur.SHOULD))
-                    query.add (new BooleanClause(rhsQuery, BooleanClause.Occur.SHOULD))
-                    return query :> Query
+                    return LuceneProviders.getBooleanQuery
+                        |> LuceneProviders.addBooleanClause lhsQuery BooleanClause.Occur.SHOULD
+                        |> LuceneProviders.addBooleanClause rhsQuery BooleanClause.Occur.SHOULD
+                        :> Query
                 | AndPredidate(lhs, rhs) -> 
                     let! lhsQuery = generateQuery (lhs)
                     let! rhsQuery = generateQuery (rhs)
-                    let query = new BooleanQuery()
-                    query.add (new BooleanClause(lhsQuery, BooleanClause.Occur.MUST))
-                    query.add (new BooleanClause(rhsQuery, BooleanClause.Occur.MUST))
-                    return query :> Query
+                    return LuceneProviders.getBooleanQuery
+                        |> LuceneProviders.addBooleanClause lhsQuery BooleanClause.Occur.MUST
+                        |> LuceneProviders.addBooleanClause rhsQuery BooleanClause.Occur.MUST
+                        :> Query
             }
         generateQuery predicate
     
@@ -195,7 +172,7 @@ module SearchDsl =
             | null -> Sort.RELEVANCE
             | _ -> 
                 match flexIndex.IndexSetting.FieldsLookup.TryGetValue(search.OrderBy) with
-                | (true, field) -> new Sort(new SortField(field.SchemaName, FlexField.SortField(field)))
+                | (true, field) -> LuceneProviders.getSort field.SchemaName (FlexField.SortField(field))
                 | _ -> Sort.RELEVANCE
         
         let count = 
@@ -212,18 +189,8 @@ module SearchDsl =
         let hits = totalDocs.scoreDocs
         let recordsReturned = totalDocs.scoreDocs.Count() - search.Skip
         let totalAvailable = totalDocs.totalHits
-        
-        let highlighterOptions = 
-            if search.Highlights <> Unchecked.defaultof<_> then 
-                match search.Highlights.HighlightedFields with
-                | x when x.Count = 1 -> 
-                    match flexIndex.IndexSetting.FieldsLookup.TryGetValue(x.First()) with
-                    | (true, field) -> 
-                        let htmlFormatter = new SimpleHTMLFormatter(search.Highlights.PreTag, search.Highlights.PostTag)
-                        Some(field, new Highlighter(htmlFormatter, new QueryScorer(query)))
-                    | _ -> None
-                | _ -> None
-            else None
+        let highlighterOptions = LuceneProviders.getHighlighter search flexIndex query
+
         (hits, highlighterOptions, recordsReturned, totalAvailable, indexSearchers)
     
     let GetDocument(flexIndex : FlexIndex, search : SearchQuery, document : org.apache.lucene.document.Document) = 

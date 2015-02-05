@@ -66,7 +66,7 @@ module ``Analysis tests`` =
         filters.Add(filter)
         let exp = tokenizerTestCases.[caseNumber]
         let analyzer = new CustomAnalyzer(exp.Tokenizer, filters.ToArray())
-        let output = SearchDsl.ParseTextUsingAnalyzer(analyzer, "test", exp.Input)
+        let output = LuceneProviders.ParseTextUsingAnalyzer(analyzer, "test", exp.Input)
         Assert.Equal<List<string>>(exp.Output.ToList(), output)
     
     type FilterTestObject = 
@@ -147,5 +147,5 @@ module ``Analysis tests`` =
         let filters = [| exp.Filter |]
         filters.[0].Initialize(exp.Parameters) |> ignore
         let analyzer = new CustomAnalyzer(new StandardTokenizerFactory(), filters)
-        let output = SearchDsl.ParseTextUsingAnalyzer(analyzer, "test", exp.Input)
+        let output = LuceneProviders.ParseTextUsingAnalyzer(analyzer, "test", exp.Input)
         Assert.Equal<List<string>>(exp.Output.ToList(), output)
