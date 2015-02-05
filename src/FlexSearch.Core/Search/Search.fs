@@ -94,7 +94,7 @@ module SearchDsl =
                 | NotPredicate(pr) -> 
                     let! notQuery = generateQuery (pr)
                     return 
-                        LuceneProviders.getBooleanQuery
+                        LuceneProviders.getBooleanQuery()
                         |> LuceneProviders.addBooleanClause notQuery BooleanClause.Occur.MUST_NOT
                         :> Query
                 | Condition(f, o, v, p) -> 
@@ -127,7 +127,7 @@ module SearchDsl =
                                         return! v.GetValueAsArray()
                             | None -> return! v.GetValueAsArray()
                         }
-                    if generateMatchAllQuery.Value = true then return! Choice1Of2(LuceneProviders.getMatchAllDocsQuery :> Query)
+                    if generateMatchAllQuery.Value = true then return! Choice1Of2(LuceneProviders.getMatchAllDocsQuery() :> Query)
                     else 
                         let! q = query.GetQuery(field, value.ToArray(), p)
                         match p with
@@ -143,14 +143,14 @@ module SearchDsl =
                 | OrPredidate(lhs, rhs) -> 
                     let! lhsQuery = generateQuery (lhs)
                     let! rhsQuery = generateQuery (rhs)
-                    return LuceneProviders.getBooleanQuery
+                    return LuceneProviders.getBooleanQuery()
                         |> LuceneProviders.addBooleanClause lhsQuery BooleanClause.Occur.SHOULD
                         |> LuceneProviders.addBooleanClause rhsQuery BooleanClause.Occur.SHOULD
                         :> Query
                 | AndPredidate(lhs, rhs) -> 
                     let! lhsQuery = generateQuery (lhs)
                     let! rhsQuery = generateQuery (rhs)
-                    return LuceneProviders.getBooleanQuery
+                    return LuceneProviders.getBooleanQuery()
                         |> LuceneProviders.addBooleanClause lhsQuery BooleanClause.Occur.MUST
                         |> LuceneProviders.addBooleanClause rhsQuery BooleanClause.Occur.MUST
                         :> Query

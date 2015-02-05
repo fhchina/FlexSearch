@@ -21,13 +21,13 @@ open FlexSearch.Api
 module LuceneProviders =
     
     // CharTermAttributes
-    let FlexCharTermAttribute = 
+    let FlexCharTermAttribute =
         lazy java.lang.Class.forName 
                  (typeof<org.apache.lucene.analysis.tokenattributes.CharTermAttribute>.AssemblyQualifiedName)
 
     // Queries
-    let getMatchAllDocsQuery = new MatchAllDocsQuery()
-    let getBooleanQuery = new BooleanQuery() 
+    let getMatchAllDocsQuery = fun () -> new MatchAllDocsQuery()
+    let getBooleanQuery = fun () -> new BooleanQuery() 
 
     // Clauses
     let addBooleanClause inheritedQuery occur (baseQuery : BooleanQuery) = 
