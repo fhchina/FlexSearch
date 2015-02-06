@@ -127,7 +127,7 @@ module SearchDsl =
                                         return! v.GetValueAsArray()
                             | None -> return! v.GetValueAsArray()
                         }
-                    if generateMatchAllQuery.Value = true then return! Choice1Of2(LuceneProviders.getMatchAllDocsQuery() :> Query)
+                    if generateMatchAllQuery.Value = true then return! Choice1Of2(LuceneProviders.getMatchAllDocsQuery())
                     else 
                         let! q = query.GetQuery(field, value.ToArray(), p)
                         match p with

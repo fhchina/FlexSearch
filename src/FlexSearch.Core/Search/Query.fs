@@ -45,34 +45,21 @@ type FlexTermQuery() =
         member this.QueryName() = [| "eq"; "=" |]
         member this.GetQuery(flexIndexField, values, parameters) = 
             match IsNumericField(flexIndexField) with
-            | true -> NumericTermQuery(flexIndexField, values.[0])
+            | true -> 
+                LuceneProviders.getRangeQuery
+                    values.[0]
+                    (true, true)
+                    (NoInfinite, NoInfinite)
+                    flexIndexField
             | false -> 
-                let terms = GetTerms(flexIndexField, values.[0])
                 // If there are multiple terms returned by the parser then we will create a boolean query
                 // with all the terms as sub clauses with And operator
                 // This behaviour will result in matching of both the terms in the results which may not be
                 // adjacent to each other. The adjacency case should be handled through phrase query
-                match terms.Count with
-                | 0 -> Choice1Of2(new MatchAllDocsQuery() :> Query)
-                | 1 -> Choice1Of2(new TermQuery(new Term(flexIndexField.SchemaName, terms.[0])) :> Query)
-                | _ -> 
-                    // Generate boolean query
-                    let boolClause = 
-                        match parameters with
-                        | Some(p) -> 
-                            match p.TryGetValue("clausetype") with
-                            | true, b -> 
-                                match b with
-                                | InvariantEqual "or" -> BooleanClause.Occur.SHOULD
-                                | _ -> BooleanClause.Occur.MUST
-                            | _ -> BooleanClause.Occur.MUST
-                        | _ -> BooleanClause.Occur.MUST
-                    
-                    let boolQuery = new BooleanQuery()
-                    for term in terms do
-                        boolQuery.add 
-                            (new BooleanClause(new TermQuery(new Term(flexIndexField.SchemaName, term)), boolClause))
-                    Choice1Of2(boolQuery :> Query)
+                LuceneProviders.zeroOneOrManyQuery
+                    (GetTerms(flexIndexField, values.[0]))
+                    (LuceneProviders.getTermQuery flexIndexField.SchemaName)
+                    (LuceneProviders.getBooleanClause parameters)
 
 // ----------------------------------------------------------------------------
 /// Fuzzy Query
@@ -83,21 +70,13 @@ type FlexFuzzyQuery() =
     interface IFlexQuery with
         member this.QueryName() = [| "fuzzy"; "~=" |]
         member this.GetQuery(flexIndexField, values, parameters) = 
-            let terms = GetTerms(flexIndexField, values.[0])
             let slop = GetIntValueFromMap parameters "slop" 1
             let prefixLength = GetIntValueFromMap parameters "prefixlength" 0
-            match terms.Count with
-            | 0 -> Choice1Of2(new MatchAllDocsQuery() :> Query)
-            | 1 -> 
-                Choice1Of2(new FuzzyQuery(new Term(flexIndexField.SchemaName, terms.[0]), slop, prefixLength) :> Query)
-            | _ -> 
-                // Generate boolean query
-                let boolQuery = new BooleanQuery()
-                for term in terms do
-                    boolQuery.add 
-                        (new BooleanClause(new FuzzyQuery(new Term(flexIndexField.SchemaName, term), slop, prefixLength), 
-                                           BooleanClause.Occur.MUST))
-                Choice1Of2(boolQuery :> Query)
+
+            LuceneProviders.zeroOneOrManyQuery
+                (GetTerms(flexIndexField, values.[0]))
+                (LuceneProviders.getFuzzyQuery flexIndexField.SchemaName slop prefixLength)
+                BooleanClause.Occur.MUST
 
 // ----------------------------------------------------------------------------
 /// Match all Query
@@ -107,7 +86,8 @@ type FlexFuzzyQuery() =
 type FlexMatchAllQuery() = 
     interface IFlexQuery with
         member this.QueryName() = [| "matchall" |]
-        member this.GetQuery(flexIndexField, values, parameters) = Choice1Of2(new MatchAllDocsQuery() :> Query)
+        member this.GetQuery(flexIndexField, values, parameters) = 
+            LuceneProviders.getMatchAllDocsQuery() |> Choice1Of2
 
 // ----------------------------------------------------------------------------
 /// Phrase Query
@@ -119,12 +99,13 @@ type FlexPhraseQuery() =
         member this.QueryName() = [| "match" |]
         member this.GetQuery(flexIndexField, values, parameters) = 
             let terms = GetTerms(flexIndexField, values.[0])
-            let query = new PhraseQuery()
-            for term in terms do
-                query.add (new Term(flexIndexField.SchemaName, term))
+            let query = LuceneProviders.getPhraseQuery()
+            terms
+            |> Seq.iter (fun term ->
+                query.add (LuceneProviders.getTerm flexIndexField.SchemaName term))
             let slop = GetIntValueFromMap parameters "slop" 0
             query.setSlop (slop)
-            Choice1Of2(query :> Query)
+            query :> Query |> Choice1Of2
 
 // ----------------------------------------------------------------------------
 /// Wildcard Query
@@ -137,19 +118,10 @@ type FlexWildcardQuery() =
         member this.GetQuery(flexIndexField, values, parameters) = 
             // Like query does not go through analysis phase as the analyzer would remove the
             // special character
-            match values.Count() with
-            | 0 -> Choice1Of2(new MatchAllDocsQuery() :> Query)
-            | 1 -> 
-                Choice1Of2
-                    (new WildcardQuery(new Term(flexIndexField.SchemaName, values.[0].ToLowerInvariant())) :> Query)
-            | _ -> 
-                // Generate boolean query
-                let boolQuery = new BooleanQuery()
-                for term in values do
-                    boolQuery.add 
-                        (new WildcardQuery(new Term(flexIndexField.SchemaName, term.ToLowerInvariant())), 
-                         BooleanClause.Occur.MUST)
-                Choice1Of2(boolQuery :> Query)
+            LuceneProviders.zeroOneOrManyQuery
+                (values |> Seq.map (fun x -> x.ToLowerInvariant()))
+                (LuceneProviders.getWildCardQuery flexIndexField.SchemaName)
+                BooleanClause.Occur.MUST
 
 // ----------------------------------------------------------------------------
 /// Regex Query
@@ -162,18 +134,10 @@ type RegexQuery() =
         member this.GetQuery(flexIndexField, values, parameters) = 
             // Regex query does not go through analysis phase as the analyzer would remove the
             // special character
-            match values.Count() with
-            | 0 -> Choice1Of2(new MatchAllDocsQuery() :> Query)
-            | 1 -> 
-                Choice1Of2(new RegexpQuery(new Term(flexIndexField.SchemaName, values.[0].ToLowerInvariant())) :> Query)
-            | _ -> 
-                // Generate boolean query
-                let boolQuery = new BooleanQuery()
-                for term in values do
-                    boolQuery.add 
-                        (new RegexpQuery(new Term(flexIndexField.SchemaName, term.ToLowerInvariant())), 
-                         BooleanClause.Occur.MUST)
-                Choice1Of2(boolQuery :> Query)
+           LuceneProviders.zeroOneOrManyQuery
+                (values |> Seq.map (fun x -> x.ToLowerInvariant()))
+                (LuceneProviders.getRegexpQuery flexIndexField.SchemaName)
+                BooleanClause.Occur.MUST
 
 // ----------------------------------------------------------------------------
 // Range Queries
@@ -186,50 +150,11 @@ type FlexGreaterQuery() =
         member this.GetQuery(flexIndexField, values, parameters) = 
             // Greater query does not go through analysis phase as the analyzer would remove the
             // special character
-            let includeLower = false
-            let includeUpper = true
-            match IsNumericField(flexIndexField) with
-            | true -> 
-                match flexIndexField.FieldType with
-                | FlexDate | FlexDateTime | FlexLong -> 
-                    match Int64.TryParse(values.[0]) with
-                    | true, val1 -> 
-                        Choice1Of2
-                            (NumericRangeQuery.newLongRange 
-                                 (flexIndexField.SchemaName, GetJavaLong(val1), JavaLongMax, includeLower, includeUpper) :> Query)
-                    | _ -> 
-                        Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                                   |> GenerateOperationMessage
-                                   |> Append("Field Name", flexIndexField.FieldName))
-                | FlexInt -> 
-                    match Int32.TryParse(values.[0]) with
-                    | true, val1 -> 
-                        Choice1Of2
-                            (NumericRangeQuery.newIntRange 
-                                 (flexIndexField.SchemaName, GetJavaInt(val1), JavaIntMax, includeLower, includeUpper) :> Query)
-                    | _ -> 
-                        Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                                   |> GenerateOperationMessage
-                                   |> Append("Field Name", flexIndexField.FieldName))
-                | FlexDouble -> 
-                    match Double.TryParse(values.[0]) with
-                    | true, val1 -> 
-                        Choice1Of2
-                            (NumericRangeQuery.newDoubleRange 
-                                 (flexIndexField.SchemaName, GetJavaDouble(val1), JavaDoubleMax, includeLower, 
-                                  includeUpper) :> Query)
-                    | _ -> 
-                        Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                                   |> GenerateOperationMessage
-                                   |> Append("Field Name", flexIndexField.FieldName))
-                | _ -> 
-                    Choice2Of2(Errors.QUERY_OPERATOR_FIELD_TYPE_NOT_SUPPORTED
-                               |> GenerateOperationMessage
-                               |> Append("Field Name", flexIndexField.FieldName))
-            | false -> 
-                Choice2Of2(Errors.QUERY_OPERATOR_FIELD_TYPE_NOT_SUPPORTED
-                           |> GenerateOperationMessage
-                           |> Append("Field Name", flexIndexField.FieldName))
+            LuceneProviders.getRangeQuery
+                values.[0]
+                (false, true)
+                (NoInfinite, MaxInfinite)
+                flexIndexField
 
 [<Name("greater_than_equal")>]
 [<Sealed>]
@@ -239,50 +164,11 @@ type FlexGreaterThanEqualQuery() =
         member this.GetQuery(flexIndexField, values, parameters) = 
             // Greater query does not go through analysis phase as the analyzer would remove the
             // special character
-            let includeLower = true
-            let includeUpper = true
-            match IsNumericField(flexIndexField) with
-            | true -> 
-                match flexIndexField.FieldType with
-                | FlexDate | FlexDateTime | FlexLong -> 
-                    match Int64.TryParse(values.[0]) with
-                    | true, val1 -> 
-                        Choice1Of2
-                            (NumericRangeQuery.newLongRange 
-                                 (flexIndexField.SchemaName, GetJavaLong(val1), JavaLongMax, includeLower, includeUpper) :> Query)
-                    | _ -> 
-                        Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                                   |> GenerateOperationMessage
-                                   |> Append("Field Name", flexIndexField.FieldName))
-                | FlexInt -> 
-                    match Int32.TryParse(values.[0]) with
-                    | true, val1 -> 
-                        Choice1Of2
-                            (NumericRangeQuery.newIntRange 
-                                 (flexIndexField.SchemaName, GetJavaInt(val1), JavaIntMax, includeLower, includeUpper) :> Query)
-                    | _ -> 
-                        Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                                   |> GenerateOperationMessage
-                                   |> Append("Field Name", flexIndexField.FieldName))
-                | FlexDouble -> 
-                    match Double.TryParse(values.[0]) with
-                    | true, val1 -> 
-                        Choice1Of2
-                            (NumericRangeQuery.newDoubleRange 
-                                 (flexIndexField.SchemaName, GetJavaDouble(val1), JavaDoubleMax, includeLower, 
-                                  includeUpper) :> Query)
-                    | _ -> 
-                        Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                                   |> GenerateOperationMessage
-                                   |> Append("Field Name", flexIndexField.FieldName))
-                | _ -> 
-                    Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                               |> GenerateOperationMessage
-                               |> Append("Field Name", flexIndexField.FieldName))
-            | false -> 
-                Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                           |> GenerateOperationMessage
-                           |> Append("Field Name", flexIndexField.FieldName))
+            LuceneProviders.getRangeQuery
+                values.[0]
+                (true, true)
+                (NoInfinite, MaxInfinite)
+                flexIndexField
 
 [<Name("less_than")>]
 [<Sealed>]
@@ -292,50 +178,11 @@ type FlexLessThanQuery() =
         member this.GetQuery(flexIndexField, values, parameters) = 
             // Greater query does not go through analysis phase as the analyzer would remove the
             // special character
-            let includeLower = true
-            let includeUpper = false
-            match IsNumericField(flexIndexField) with
-            | true -> 
-                match flexIndexField.FieldType with
-                | FlexDate | FlexDateTime | FlexLong -> 
-                    match Int64.TryParse(values.[0]) with
-                    | true, val1 -> 
-                        Choice1Of2
-                            (NumericRangeQuery.newLongRange 
-                                 (flexIndexField.SchemaName, JavaLongMin, GetJavaLong(val1), includeLower, includeUpper) :> Query)
-                    | _ -> 
-                        Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                                   |> GenerateOperationMessage
-                                   |> Append("Field Name", flexIndexField.FieldName))
-                | FlexInt -> 
-                    match Int32.TryParse(values.[0]) with
-                    | true, val1 -> 
-                        Choice1Of2
-                            (NumericRangeQuery.newIntRange 
-                                 (flexIndexField.SchemaName, JavaIntMin, GetJavaInt(val1), includeLower, includeUpper) :> Query)
-                    | _ -> 
-                        Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                                   |> GenerateOperationMessage
-                                   |> Append("Field Name", flexIndexField.FieldName))
-                | FlexDouble -> 
-                    match Double.TryParse(values.[0]) with
-                    | true, val1 -> 
-                        Choice1Of2
-                            (NumericRangeQuery.newDoubleRange 
-                                 (flexIndexField.SchemaName, JavaDoubleMin, GetJavaDouble(val1), includeLower, 
-                                  includeUpper) :> Query)
-                    | _ -> 
-                        Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                                   |> GenerateOperationMessage
-                                   |> Append("Field Name", flexIndexField.FieldName))
-                | _ -> 
-                    Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                               |> GenerateOperationMessage
-                               |> Append("Field Name", flexIndexField.FieldName))
-            | false -> 
-                Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                           |> GenerateOperationMessage
-                           |> Append("Field Name", flexIndexField.FieldName))
+            LuceneProviders.getRangeQuery
+                values.[0]
+                (true, false)
+                (MinInfinite, NoInfinite)
+                flexIndexField
 
 [<Name("less_than_equal")>]
 [<Sealed>]
@@ -345,47 +192,8 @@ type FlexLessThanEqualQuery() =
         member this.GetQuery(flexIndexField, values, parameters) = 
             // Greater query does not go through analysis phase as the analyzer would remove the
             // special character
-            let includeLower = true
-            let includeUpper = true
-            match IsNumericField(flexIndexField) with
-            | true -> 
-                match flexIndexField.FieldType with
-                | FlexDate | FlexDateTime | FlexLong -> 
-                    match Int64.TryParse(values.[0]) with
-                    | true, val1 -> 
-                        Choice1Of2
-                            (NumericRangeQuery.newLongRange 
-                                 (flexIndexField.SchemaName, JavaLongMin, GetJavaLong(val1), includeLower, includeUpper) :> Query)
-                    | _ -> 
-                        Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                                   |> GenerateOperationMessage
-                                   |> Append("Field Name", flexIndexField.FieldName))
-                | FlexInt -> 
-                    match Int32.TryParse(values.[0]) with
-                    | true, val1 -> 
-                        Choice1Of2
-                            (NumericRangeQuery.newIntRange 
-                                 (flexIndexField.SchemaName, JavaIntMin, GetJavaInt(val1), includeLower, includeUpper) :> Query)
-                    | _ -> 
-                        Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                                   |> GenerateOperationMessage
-                                   |> Append("Field Name", flexIndexField.FieldName))
-                | FlexDouble -> 
-                    match Double.TryParse(values.[0]) with
-                    | true, val1 -> 
-                        Choice1Of2
-                            (NumericRangeQuery.newDoubleRange 
-                                 (flexIndexField.SchemaName, JavaDoubleMin, GetJavaDouble(val1), includeLower, 
-                                  includeUpper) :> Query)
-                    | _ -> 
-                        Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                                   |> GenerateOperationMessage
-                                   |> Append("Field Name", flexIndexField.FieldName))
-                | _ -> 
-                    Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                               |> GenerateOperationMessage
-                               |> Append("Field Name", flexIndexField.FieldName))
-            | false -> 
-                Choice2Of2(Errors.DATA_CANNOT_BE_PARSED
-                           |> GenerateOperationMessage
-                           |> Append("Field Name", flexIndexField.FieldName))
+            LuceneProviders.getRangeQuery
+                values.[0]
+                (true, true)
+                (MinInfinite, NoInfinite)
+                flexIndexField

@@ -102,7 +102,6 @@
     <Compile Include="Index\IndexOperations.fs" />
     <Compile Include="Search\LuceneProviders.fs" />
     <Compile Include="Search\Search.fs" />
-    <Compile Include="Search\QueryHelpers.fs" />
     <Compile Include="Search\Query.fs" />
     <Compile Include="Builders\ScriptPropertiesExtensions.fs" />
     <Compile Include="Builders\FieldPropertiesExtensions.fs" />
