@@ -20,21 +20,21 @@ open FlexSearch.Common
 module SearchQueryExtensions = 
     type SearchQuery with
         
-        member this.Build(queryTypes : Dictionary<string, IFlexQuery>, parser : IFlexParser) = 
+        member this.Build(queryTypes : Dictionary<string, IFlexQuery>) = 
             maybe { 
                 assert (queryTypes.Count > 0)
                 assert (String.IsNullOrWhiteSpace(this.QueryString) <> true)
-                let! predicate = parser.Parse(this.QueryString)
+                let! predicate = Parsers.ParsePredicateQuery(this.QueryString)
                 return predicate
             }
         
         static member Build(profiles : List<SearchQuery>, fields : Dictionary<string, FlexField>, 
-                            queryTypes : Dictionary<string, IFlexQuery>, parser : FlexParser) = 
+                            queryTypes : Dictionary<string, IFlexQuery>) = 
             maybe { 
                 let result = new Dictionary<string, Predicate * SearchQuery>(StringComparer.OrdinalIgnoreCase)
                 for profile in profiles do
                     assert(String.IsNullOrWhiteSpace(profile.QueryName) <> true)
-                    let! profileObject = profile.Build(queryTypes, parser)
+                    let! profileObject = profile.Build(queryTypes)
                     result.Add(profile.QueryName, (profileObject, profile))
                 return result
             }

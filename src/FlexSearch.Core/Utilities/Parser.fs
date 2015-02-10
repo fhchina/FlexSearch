@@ -35,13 +35,13 @@ module Parsers =
             (stringsSepBy (manySatisfy (fun c -> c <> '\'' && c <> '\\')) (pstring "\\" >>. escape)) |>> SingleValue 
         .>> ws
     
-    let stringLiteralAsString = 
+    let private stringLiteralAsString = 
         let escape = anyOf "'" |>> function 
                      | c -> string c // every other char is mapped to itself
         between (pstring "\'") (pstring "\'") 
             (stringsSepBy (manySatisfy (fun c -> c <> '\'' && c <> '\\')) (pstring "\\" >>. escape)) .>> ws
     
-    let stringLiteralList = 
+    let private stringLiteralList = 
         let escape = anyOf "'" |>> function 
                      | c -> string c // every other char is mapped to itself
         between (pstring "\'") (pstring "\'") 
@@ -54,16 +54,16 @@ module Parsers =
     /// Note: THe order of choice is important as stringLiteral uses
     /// character backtracking.This is done to avoid the use of attempt.
     /// </summary>
-    let value = choice [ stringLiteral; listOfValues ]
+    let private value = choice [ stringLiteral; listOfValues ]
     
     /// <summary>
     /// Identifier implementation. Alphanumeric character without spaces
     /// </summary>
-    let identifier = 
+    let private identifier = 
         many1SatisfyL (fun c -> c <> ' ' && c <> '(' && c <> ')' && c <> ':' && c <> ''') 
             "Field name should be alpha number without '(', ')' and ' '." .>> ws
     
-    let DictionaryOfList(elements : (string * string) list) = 
+    let private DictionaryOfList(elements : (string * string) list) = 
         let result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         for (key, value) in elements do
             result.Add(key, value)
@@ -77,14 +77,13 @@ module Parsers =
     let private keyValuePairs = (sepBy keyValue (str_ws ",")) |>> DictionaryOfList .>> ws
     let private keyValuePairsBetweenBracket = between (str_ws "{") (str_ws "}") keyValuePairs .>> ws
     let private queryStringParser : Parser<_, unit> = ws >>. keyValuePairs .>> eof
-    let private queryStringParserWithBracket : Parser<_, unit> = ws >>. keyValuePairsBetweenBracket .>> eof
     
     /// <summary>
     /// Search profile query string parser 
     /// Format: fieldname:'value',fieldname:'value',fieldname:'value'
     /// </summary>
     /// <param name="input"></param>
-    let ParseQueryString(input : string, withBrackets : bool) = 
+    let ParseSearchProfileQuery(input : string) = 
         let parse (queryString) (parser) = 
             match run parser queryString with
             | Success(result, _, _) -> Choice1Of2(result)
@@ -93,63 +92,55 @@ module Parsers =
                            |> GenerateOperationMessage
                            |> Append("Message", errorMsg))
         assert (input <> null)
-        if withBrackets then queryStringParserWithBracket |> parse input
-        else queryStringParser |> parse input
+        queryStringParser |> parse input
     
-    /// <summary>
-    /// Boost parser implemented using optional argument for optimization
-    /// </summary>
-    //let boost = opt (str_ws "boost" >>. pint32 .>> ws)
-    let parameters = opt (ws >>. keyValuePairsBetweenBracket .>> ws)
-    
+
     // ----------------------------------------------------------------------------
-    /// <summary>
-    /// Method to implement predicate matching
-    /// Syntax: {FieldName} {Operator} {SingleValue|MultiFieldValue} {optional Boost}
-    /// Example: firstname eq 'a'
-    /// </summary>
-    let predicate = pipe4 identifier identifier value parameters (fun l o r b -> Condition(l, o, r, b))
-    
+    // Predicate Queries
+    // ----------------------------------------------------------------------------
+
     type Assoc = Associativity
     
-    /// Generates all possible case combinations for the key words
-    let private orCases = [ "or"; "oR"; "Or"; "OR" ]
+    // Operator precedence parser that is only executed once in the application lifetime
+    let private predicateParser = 
+        let parameters = opt (ws >>. keyValuePairsBetweenBracket .>> ws)
     
-    let private andCases = [ "and"; "anD"; "aNd"; "aND"; "And"; "AnD"; "ANd"; "AND" ]
-    let private notCases = [ "not"; "noT"; "nOt"; "nOT"; "Not"; "NoT"; "NOt"; "NOT" ]
+        // Syntax: {FieldName} {Operator} {SingleValue|MultiFieldValue} {optional Boost}
+        // Example: firstname eq 'a'
+        let predicate = pipe4 identifier identifier value parameters (fun l o r b -> Condition(l, o, r, b))
     
-    /// <summary>
-    /// Default Parser for query parsing. 
-    /// Note: The reason to create a parser class is to hide FParsec OperatorPrecedenceParser
-    /// as it is not thread safe. This class will be created using object pool
-    /// </summary> 
-    [<Sealed>]
-    type FlexParser() = 
-        inherit PooledObject()
+        /// Generate all possible case combinations for the keywords
+        let orCases = [ "or"; "oR"; "Or"; "OR" ]
+        let andCases = [ "and"; "anD"; "aNd"; "aND"; "And"; "AnD"; "ANd"; "AND" ]
+        let notCases = [ "not"; "noT"; "nOt"; "nOT"; "Not"; "NoT"; "NOt"; "NOT" ]
+
         let opp = new OperatorPrecedenceParser<Predicate, unit, unit>()
         let expr = opp.ExpressionParser
-        
         let term = 
             // Use >>? to avoid the usage of attempt
             choice [ (str_ws "(" >>? expr .>> str_ws ")")
                      predicate ]
         
-        let Parser : Parser<_, unit> = ws >>. expr .>> eof
-        
-        do 
-            opp.TermParser <- term
-            orCases 
-            |> List.iter (fun x -> opp.AddOperator(InfixOperator(x, ws, 1, Assoc.Left, fun x y -> OrPredidate(x, y))))
-            andCases 
-            |> List.iter (fun x -> opp.AddOperator(InfixOperator(x, ws, 2, Assoc.Left, fun x y -> AndPredidate(x, y))))
-            notCases |> List.iter (fun x -> opp.AddOperator(PrefixOperator(x, ws, 3, true, fun x -> NotPredicate(x))))
-        
-        interface IFlexParser with
-            member this.Parse(input : string) = 
-                assert (input <> null)
-                match run Parser input with
-                | Success(result, _, _) -> Choice1Of2(result)
-                | Failure(errorMsg, _, _) -> 
-                    Choice2Of2(Errors.QUERYSTRING_PARSING_ERROR
-                               |> GenerateOperationMessage
-                               |> Append("Message", errorMsg))
+        opp.TermParser <- term
+        orCases 
+        |> List.iter (fun x -> opp.AddOperator(InfixOperator(x, ws, 1, Assoc.Left, fun x y -> OrPredidate(x, y))))
+        andCases 
+        |> List.iter (fun x -> opp.AddOperator(InfixOperator(x, ws, 2, Assoc.Left, fun x y -> AndPredidate(x, y))))
+        notCases 
+        |> List.iter (fun x -> opp.AddOperator(PrefixOperator(x, ws, 3, true, fun x -> NotPredicate(x))))
+
+        opp
+
+    /// <summary>
+    /// Parses the given input with an OperatorPrecedenceParser. Using this parser's
+    /// ExpressionParser is thread safe as long as the OPP instance is not modified at
+    /// the same time.
+    /// </summary>
+    let ParsePredicateQuery input = 
+        assert (input <> null)
+        match run (ws >>. predicateParser.ExpressionParser .>> eof) input with
+        | Success(result, _, _) -> Choice1Of2(result)
+        | Failure(errorMsg, _, _) -> 
+            Choice2Of2(Errors.QUERYSTRING_PARSING_ERROR
+                        |> GenerateOperationMessage
+                        |> Append("Message", errorMsg))

@@ -30,7 +30,7 @@ open System.Linq
 /// module but to only pass mutable state as an instance of NodeState
 /// </summary>
 [<Sealed>]
-type SearchService(regManager : RegisterationManager, queryFactory : IFlexFactory<IFlexQuery>, parser : IFlexParser) = 
+type SearchService(regManager : RegisterationManager, queryFactory : IFlexFactory<IFlexQuery>) = 
     
     // Generate query types from query factory. This is necessary as a single query can support multiple
     // query names
@@ -46,15 +46,14 @@ type SearchService(regManager : RegisterationManager, queryFactory : IFlexFactor
             if String.IsNullOrWhiteSpace(search.SearchProfile) <> true then 
                 // Search profile based
                 match flexIndex.IndexSetting.SearchProfiles.TryGetValue(search.SearchProfile) with
-                | true, p -> 
-                    let (p', sq) = p
+                | true, (p, sq) -> 
                     search.MissingValueConfiguration <- sq.MissingValueConfiguration
                     let! values = match inputValues with
                                   | Some(values) -> Choice1Of2(values)
-                                  | None -> Parsers.ParseQueryString(search.QueryString, false)
-                    return! Choice1Of2(p', Some(values))
+                                  | None -> Parsers.ParseSearchProfileQuery(search.QueryString)
+                    return! Choice1Of2(p, Some(values))
                 | _ -> return! Choice2Of2(Errors.SEARCH_PROFILE_NOT_FOUND |> GenerateOperationMessage)
-            else let! predicate = parser.Parse(search.QueryString)
+            else let! predicate = Parsers.ParsePredicateQuery(search.QueryString)
                  return! Choice1Of2(predicate, None)
         }
     
@@ -68,38 +67,42 @@ type SearchService(regManager : RegisterationManager, queryFactory : IFlexFactor
                             (flexIndex.IndexSetting.FieldsLookup, predicate, search, searchProfile, queryTypes)
         }
     
+    let GetSearchResult (searchQuery : SearchQuery) inputFields =
+        maybe {
+            let! flexIndex = regManager.IsOpen(searchQuery.IndexName)
+            let! query = GenerateSearchQuery(flexIndex.Index.Value, searchQuery, inputFields)
+            return! SearchDsl.SearchDocumentSeq(flexIndex.Index.Value, query, searchQuery)
+        }
+
+    let ToSearchResults (results : seq<_>, recordsReturned, totalAvailable) =
+        let searchResults = new SearchResults()
+        searchResults.Documents <- results.ToList()
+        searchResults.TotalAvailable <- totalAvailable
+        searchResults.RecordsReturned <- recordsReturned
+        searchResults
+
     interface ISearchService with
         
-        member this.SearchUsingProfile(searchQuery : SearchQuery, inputFields : Dictionary<string, string>) = 
+        member this.SearchUsingProfile (searchQuery, inputFields) = 
             maybe { 
-                let! flexIndex = regManager.IsOpen(searchQuery.IndexName)
-                let! query = GenerateSearchQuery(flexIndex.Index.Value, searchQuery, Some(inputFields))
-                let! (results, recordsReturned, totalAvailable) = SearchDsl.SearchDocumentSeq
-                                                                      (flexIndex.Index.Value, query, searchQuery)
-                let searchResults = new SearchResults()
-                searchResults.Documents <- results.ToList()
-                searchResults.TotalAvailable <- totalAvailable
-                searchResults.RecordsReturned <- recordsReturned
-                return! Choice1Of2(searchResults)
+                let! output = GetSearchResult searchQuery (Some(inputFields))
+                return! 
+                    output
+                    |> ToSearchResults
+                    |> Choice1Of2
             }
         
-        member this.Search(searchQuery) = 
+        member this.Search searchQuery  = 
             maybe { 
-                let! flexIndex = regManager.IsOpen(searchQuery.IndexName)
-                let! query = GenerateSearchQuery(flexIndex.Index.Value, searchQuery, None)
-                let! (results, recordsReturned, totalAvailable) = SearchDsl.SearchDocumentSeq
-                                                                      (flexIndex.Index.Value, query, searchQuery)
-                let searchResults = new SearchResults()
-                searchResults.Documents <- results.ToList()
-                searchResults.TotalAvailable <- totalAvailable
-                searchResults.RecordsReturned <- recordsReturned
-                return! Choice1Of2(searchResults)
+                let! output = GetSearchResult searchQuery None
+                return! 
+                    output
+                    |> ToSearchResults
+                    |> Choice1Of2
             }
         
-        member this.SearchAsDocmentSeq(searchQuery : SearchQuery) = 
-            maybe { let! flexIndex = regManager.IsOpen(searchQuery.IndexName)
-                    let! query = GenerateSearchQuery(flexIndex.Index.Value, searchQuery, None)
-                    return! SearchDsl.SearchDocumentSeq(flexIndex.Index.Value, query, searchQuery) }
+        member this.SearchAsDocumentSeq searchQuery = GetSearchResult searchQuery None
+
         member this.SearchAsDictionarySeq(searchQuery : SearchQuery) = 
             maybe { let! flexIndex = regManager.IsOpen(searchQuery.IndexName)
                     let! query = GenerateSearchQuery(flexIndex.Index.Value, searchQuery, None)

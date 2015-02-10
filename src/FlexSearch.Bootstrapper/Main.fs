@@ -62,7 +62,6 @@ module Main =
         builder |> FactoryService.RegisterSingleInstance<ThreadSafeFileWiter, IThreadSafeWriter>
         builder |> FactoryService.RegisterSingleInstance<RegisterationManager, RegisterationManager>
         // Register services
-        builder |> FactoryService.RegisterSingleInstance<FlexParser, IFlexParser>
         builder |> FactoryService.RegisterSingleInstance<IndexService, IIndexService>
         builder |> FactoryService.RegisterSingleInstance<DocumentService, IDocumentService>
         builder |> FactoryService.RegisterSingleInstance<QueueService, IQueueService>

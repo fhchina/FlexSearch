@@ -14,15 +14,13 @@ open System.Threading
 open Xunit.Extensions
 
 module ``Parser Tests`` = 
-    let parser = new FlexParser() :> IFlexParser
-    
     let test p str = 
         match FParsec.CharParsers.run p str with
         | Success(result, _, _) -> Assert.True(true)
         | Failure(errorMsg, _, _) -> Assert.True(false, errorMsg)
     
     let test2 str = 
-        match parser.Parse(str) with
+        match Parsers.ParsePredicateQuery(str) with
         | Choice1Of2(a) -> Assert.True(true)
         | Choice2Of2(errorMsg) -> Assert.True(false, errorMsg.DeveloperMessage)
 
@@ -68,7 +66,7 @@ module ``Parser Tests`` =
     [<InlineData("        f1: 'v1',f2:'v2',f3 : 'v3'", 3)>]
     [<InlineData("f1 : 'v\\'1',f2 : 'v2'", 2)>]
     let ``Search Profile QueryString should parse`` (sut: string, expected: int) =
-        match ParseQueryString(sut, false) with
+        match ParseSearchProfileQuery(sut) with
         | Choice1Of2(result) -> Assert.Equal(result.Count, expected)
         | Choice2Of2(_) -> Assert.True(false,  "Expected query string to pass")
     

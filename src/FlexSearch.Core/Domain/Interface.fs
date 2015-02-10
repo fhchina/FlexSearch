@@ -125,7 +125,7 @@ type IFlexParser =
 /// </summary>
 type ISearchService = 
     abstract Search : SearchQuery -> Choice<SearchResults, OperationMessage>
-    abstract SearchAsDocmentSeq : SearchQuery -> Choice<seq<ResultDocument> * int * int, OperationMessage>
+    abstract SearchAsDocumentSeq : SearchQuery -> Choice<seq<ResultDocument> * int * int, OperationMessage>
     abstract SearchAsDictionarySeq : SearchQuery
      -> Choice<seq<Dictionary<string, string>> * int * int, OperationMessage>
     abstract SearchUsingProfile : query:SearchQuery * inputFields:Dictionary<string, string>

@@ -37,8 +37,7 @@ type SettingsBuilder(factoryCollection : IFactoryCollection, analyzerService : I
                 let searchAnalyzer = FlexField.GetPerFieldAnalyzerWrapper(fieldsArray, false)
                 let! searchProfiles = FlexSearch.Api.SearchQuery.Build
                                           (index.SearchProfiles, fields, 
-                                           FlexSearch.Api.SearchQuery.QueryTypes(factoryCollection), 
-                                           new Parsers.FlexParser())
+                                           FlexSearch.Api.SearchQuery.QueryTypes(factoryCollection))
                 let flexIndexSetting = 
                     { IndexName = index.IndexName
                       IndexAnalyzer = indexAnalyzer
