@@ -78,3 +78,24 @@ module ``Document Tests`` =
         let actual = client.GetDocument("country", "355").Result
         handler |> VerifyHttpCode HttpStatusCode.NotFound
 
+    [<Theory; AutoMockIntegrationData; Example("delete-indices-id-documents", "")>]
+    let ``Delete all documents from an index`` (client : IFlexClient, indexName : Guid, handler : LoggingHandler) = 
+        let docsBeforeDelete = client.GetTopDocuments("country", 10).Result
+        docsBeforeDelete |> ExpectSuccess
+        Assert.True(docsBeforeDelete.Data.TotalAvailable > 0)
+
+        client.DeleteAllDocuments("country").Result |> ExpectSuccess
+
+        let docsAfterDelete = client.GetTopDocuments("country", 10).Result
+        Assert.Equal<int>(docsAfterDelete.Data.TotalAvailable, 0)
+
+    [<Theory; AutoMockIntegrationData; Example("delete-indices-id-documents", "")>]
+    let ``Delete a document from an index`` (client : IFlexClient, indexName : Guid, handler : LoggingHandler) = 
+        let docBeforeDelete = client.GetDocument("country", "10").Result
+        docBeforeDelete |> ExpectSuccess
+        Assert.Equal<String>(docBeforeDelete.Data.Id, "10")
+
+        client.DeleteDocument("country", "10").Result |> ExpectSuccess
+
+        let docAfterDelete = client.GetDocument("country", "10").Result
+        Assert.Equal<String>(docAfterDelete.Error.ErrorCode, ((int)BadRequest).ToString())

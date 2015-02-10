@@ -28,6 +28,7 @@ type IDocumentServiceClient =
     abstract AddDocument : indexName:string * document:FlexDocument -> Task<Response<CreateResponse>>
     abstract UpdateDocument : indexName:string * document:FlexDocument -> Task<Response<unit>>
     abstract DeleteDocument : indexName:string * id:string -> Task<Response<unit>>
+    abstract DeleteAllDocuments : indexName:string -> Task<Response<unit>>
     abstract GetDocument : indexName:string * id:string -> Task<Response<ResultDocument>>
 
 type ISearchServiceClient = 
@@ -130,12 +131,18 @@ type FlexClient(uri : Uri, httpClient : HttpClient, ?defaultConnectionLimit : in
         async { return! this.RequestProcessor<'U>(fun () -> client.DeleteAsync(uri)) }
     interface IFlexClient with
         member x.HttpClient : HttpClient = client
+
+        // --------------------
         // Search related
+        // --------------------
         member this.Search(searchRequest : SearchQuery) : Task<Response<SearchResults>> = 
             Async.StartAsTask
                 (this.PostHelper<SearchQuery, SearchResults>
                      (sprintf "/indices/%s/search" searchRequest.IndexName, searchRequest))
+
+        // --------------------
         // Index related
+        // --------------------
         member this.Connect() : Task<Response<unit>> = Async.StartAsTask(this.GetHelper<unit>("/ping"))
         member this.AddIndex(index : Index) : Task<Response<CreateResponse>> = 
             Async.StartAsTask(this.PostHelper<Index, CreateResponse>("/indices", index))
@@ -156,14 +163,17 @@ type FlexClient(uri : Uri, httpClient : HttpClient, ?defaultConnectionLimit : in
         member this.SetIndexOffline(indexName : string) : Task<Response<unit>> = 
             Async.StartAsTask(this.PutHelper<unit, unit>(sprintf "/indices/%s/status/offline" indexName, ()))
         
+        // --------------------
         // Document related
+        // --------------------
         member this.AddDocument(indexName : string, document : FlexDocument) : Task<Response<CreateResponse>> = 
             document.IndexName <- indexName
             Async.StartAsTask
                 (this.PostHelper<FlexDocument, CreateResponse>(sprintf "/indices/%s/documents" indexName, document))
-        
         member this.DeleteDocument(indexName : string, id : string) : Task<Response<unit>> = 
-            failwith "Not implemented yet"
+            Async.StartAsTask(this.DeleteHelper<unit>(sprintf "/indices/%s/documents/%s" indexName id))
+        member this.DeleteAllDocuments(indexName : string) : Task<Response<unit>> = 
+            Async.StartAsTask(this.DeleteHelper<unit>(sprintf "/indices/%s/documents" indexName))
         member this.GetDocument(indexName : string, id : string) : Task<Response<ResultDocument>> = 
             Async.StartAsTask(this.GetHelper<ResultDocument>(sprintf "/indices/%s/documents/%s" indexName id))
         member this.GetTopDocuments(indexName : string, count : int) : Task<Response<SearchResults>> = 

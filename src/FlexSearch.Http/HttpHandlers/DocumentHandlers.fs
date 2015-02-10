@@ -94,6 +94,23 @@ type DeleteDocumentByIdHandler(documentService : IDocumentService) =
         (documentService.DeleteDocument(id.Value, subId.Value), Ok, BadRequest)
 
 /// <summary>
+///  Delete all documents
+/// </summary>
+/// <remarks>
+/// Delete all documents in the given index
+/// </remarks>
+/// <method>DELETE</method>
+/// <uri>/indices/:indexId/documents</uri>
+/// <resource>document</resource>
+/// <id>delete-all-documents</id>
+[<Name("DELETE-/indices/:id/documents")>]
+[<Sealed>]
+type DeleteAllDocumentsHandler(documentService : IDocumentService) = 
+    inherit HttpHandlerBase<unit, unit>()
+    override this.Process(id, subId, body, context) = 
+        (documentService.DeleteAllDocuments(id.Value), Ok, BadRequest)
+
+/// <summary>
 ///  Create or update a document
 /// </summary>
 /// <remarks>
