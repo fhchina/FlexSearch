@@ -96,3 +96,39 @@ module ``Versioning tests`` =
         documentService.AddOrUpdateDocument(document) 
         |> ExpectErrorCode(Errors.INDEXING_DOCUMENT_ID_NOT_FOUND |> GenerateOperationMessage)
 
+    [<Theory; AutoMockIntegrationData>]
+    let ``After deleting a document it shouldn't be found anymore in the Getters`` (indexService : IIndexService, 
+                                                                                    documentService : IDocumentService, 
+                                                                                    index : Index) = 
+        indexService.AddIndex(index) |> ExpectSuccess
+        let document = new FlexDocument(index.IndexName, "1")
+        documentService.AddOrUpdateDocument(document) |> ExpectSuccess
+        indexService.Commit index.IndexName |> ExpectSuccess
+        indexService.Refresh index.IndexName |> ExpectSuccess
+
+        documentService.DeleteDocument(index.IndexName, "1") |> ExpectSuccess
+        indexService.Commit index.IndexName |> ExpectSuccess
+        indexService.Refresh index.IndexName |> ExpectSuccess
+
+        documentService.GetDocument(index.IndexName, "1") 
+        |> ExpectErrorCode(Errors.INDEXING_DOCUMENT_ID_NOT_FOUND |> GenerateOperationMessage)
+        
+    [<Theory; AutoMockIntegrationData>]
+    let ``After deleting all documents no document should be received from Getters`` (indexService : IIndexService, 
+                                                                                      documentService : IDocumentService, 
+                                                                                      index : Index) = 
+        indexService.AddIndex(index) |> ExpectSuccess
+        let document = new FlexDocument(index.IndexName, "1")
+        documentService.AddOrUpdateDocument(document) |> ExpectSuccess
+        indexService.Commit index.IndexName |> ExpectSuccess
+        indexService.Refresh index.IndexName |> ExpectSuccess
+        let beforeDelete = documentService.GetDocuments(index.IndexName, 10) |> GetSuccessChoice
+        Assert.True(beforeDelete.TotalAvailable > 0)
+
+        documentService.DeleteAllDocuments(index.IndexName) |> ExpectSuccess
+        indexService.Commit index.IndexName |> ExpectSuccess
+        indexService.Refresh index.IndexName |> ExpectSuccess
+
+        let afterDelete = documentService.GetDocuments(index.IndexName, 10) |> GetSuccessChoice
+        Assert.Equal(0, afterDelete.TotalAvailable)
+        
